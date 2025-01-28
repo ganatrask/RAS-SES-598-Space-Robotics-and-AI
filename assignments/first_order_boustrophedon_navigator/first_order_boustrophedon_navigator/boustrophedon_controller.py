@@ -9,6 +9,7 @@ import math
 from collections import deque
 from std_msgs.msg import Float64
 from rcl_interfaces.msg import SetParametersResult
+from parameters_msg.msg import ParametersMsg
 
 
 class BoustrophedonController(Node):
@@ -40,7 +41,8 @@ class BoustrophedonController(Node):
         # Create publisher and subscriber
         self.velocity_publisher = self.create_publisher(Twist, '/turtle1/cmd_vel', 10)
         self.pose_subscriber = self.create_subscription(Pose, '/turtle1/pose', self.pose_callback, 10)
-        
+        self.performance_metrics_publisher = self.create_publisher(ParametersMsg, 'parameters', 10) #New Publisher for custome ROS2 msg
+
         # Lawnmower pattern parameters
         self.waypoints = self.generate_waypoints()
         self.current_waypoint = 0
@@ -158,6 +160,21 @@ class BoustrophedonController(Node):
     def get_angle(self, x1, y1, x2, y2):
         return math.atan2(y2 - y1, x2 - x1)
 
+    def publish_parameters(self, cross_track_error, linear_velocity, angular_velocity):
+        parameter_msg = ParametersMsg()
+        parameter_msg.cross_track_error = cross_track_error
+        parameter_msg.linear_velocity = linear_velocity
+        parameter_msg.angular_velocity = angular_velocity
+
+        parameter_msg.distance_to_next_waypoint = self.get_distance(self.pose.x, 
+                                                      self.pose.y, 
+                                                      self.waypoints[self.current_waypoint-1][0], 
+                                                      self.waypoints[self.current_waypoint-1][1])
+        
+        parameter_msg.completion_percentage = (self.current_waypoint / (len(self.waypoints))) * 100
+
+        self.performance_metrics_publisher.publish(parameter_msg)
+    
     def control_loop(self):
         if self.current_waypoint >= len(self.waypoints):
             # Pattern complete
@@ -209,6 +226,8 @@ class BoustrophedonController(Node):
         if distance < 0.1:  # Within 0.1 units of target
             self.current_waypoint += 1
             self.get_logger().info(f'Reached waypoint {self.current_waypoint}')
+        
+        self.publish_parameters(cross_track_error, linear_velocity, angular_velocity)
 
     def parameter_callback(self, params):
         """Callback for parameter updates"""
