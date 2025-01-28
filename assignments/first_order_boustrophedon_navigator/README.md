@@ -41,6 +41,9 @@ These values were selected based on their ability to **minimize cross-track erro
 
 ---
 
+![image](https://github.com/ganatrask/RAS-SES-598-Space-Robotics-and-AI/blob/main/assignments/first_order_boustrophedon_navigator/assets/image.png)
+
+
 ## **Custom ROS2 Message for Performance Monitoring**
 A **custom ROS2 message package (`parameter_interfaces`)** was developed to provide real-time monitoring of the robot's performance metrics. This allows for continuous tracking of the **cross-track error, velocity profiles, and overall navigation efficiency**.
 
