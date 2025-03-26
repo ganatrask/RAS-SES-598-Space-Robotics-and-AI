@@ -114,6 +114,15 @@ def generate_launch_description():
         output='screen'
     )
 
+    # Static transform for OakD-Lite camera
+    camera_transform = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='oak_d_lite_tf',
+        arguments=['0', '0', '0', '0', '0', '-1.570', 'base_link', 'OakD-Lite-Modify/base_link'],
+        output='screen'
+    )
+
     return LaunchDescription([
         DeclareLaunchArgument(
             'use_sim_time',
@@ -124,6 +133,7 @@ def generate_launch_description():
             default_value=os.environ.get('HOME', '/home/' + os.environ.get('USER', 'user')) + '/PX4-Autopilot',
             description='Path to PX4-Autopilot directory'),
         px4_sitl,
+        camera_transform,
         TimerAction(
             period=2.0,
             actions=[spawn_cylinder_front]
