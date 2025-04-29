@@ -2,37 +2,111 @@
 
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import Image
-from cv_bridge import CvBridge
-import cv2
-import numpy as np
+from sensor_msgs.msg import Image, PointCloud2
+from sensor_msgs.msg import CameraInfo
+import sensor_msgs_py.point_cloud2 as pc2
+from geometry_msgs.msg import Point, PoseStamped
 from std_msgs.msg import Float32MultiArray
-from geometry_msgs.msg import Point
+from cv_bridge import CvBridge
+import numpy as np
+import cv2
+import math
+from visualization_msgs.msg import Marker, MarkerArray
 
-class GeometryTracker(Node):
+class CylinderDetector(Node):
+    """
+    ROS2 node for detecting and measuring cylindrical rock formations from point cloud data.
+    """
     def __init__(self):
-        super().__init__('geometry_tracker')
+        super().__init__('cylinder_detector')
         
         # Initialize CV bridge
-        self.cv_bridge = CvBridge()
+        self.bridge = CvBridge()
+        
+        # Camera calibration parameters
+        self.camera_matrix = None
+        self.distortion_coeffs = None
+        self.camera_info_received = False
+        
+        # Initialize data structures for cylinder tracking
+        self.cylinders = []  # List to store detected cylinders
+        
+        # Parameters
+        self.declare_parameter('min_points', 100)
+        self.declare_parameter('max_radius', 10.0)
+        self.declare_parameter('min_radius', 1.0)
+        self.declare_parameter('ransac_threshold', 0.1)
+        self.declare_parameter('ransac_iterations', 1000)
+        self.declare_parameter('detection_threshold', 0.7)
+        
+        self.min_points = self.get_parameter('min_points').value
+        self.max_radius = self.get_parameter('max_radius').value
+        self.min_radius = self.get_parameter('min_radius').value
+        self.ransac_threshold = self.get_parameter('ransac_threshold').value
+        self.ransac_iterations = self.get_parameter('ransac_iterations').value
+        self.detection_threshold = self.get_parameter('detection_threshold').value
         
         # Subscribers
-        self.depth_image_subscriber = self.create_subscription(
-            Image, '/drone/front_depth',
-            self.depth_image_callback, 10)
-            
-        # Publishers
-        self.debug_image_pub = self.create_publisher(Image, '/geometry/debug_image', 10)
-        self.cylinder_pose_pub = self.create_publisher(Point, '/geometry/cylinder_center', 10)
-        self.cylinder_info_pub = self.create_publisher(Float32MultiArray, '/geometry/cylinder_info', 10)
+        self.pointcloud_subscriber = self.create_subscription(
+            PointCloud2,
+            '/drone/front_depth/points',
+            self.pointcloud_callback,
+            10)
         
-        self.get_logger().info('Geometry tracker node initialized')
-
+        self.camera_info_subscriber = self.create_subscription(
+            CameraInfo,
+            '/drone/front_depth/camera_info',
+            self.camera_info_callback,
+            10)
+            
+        self.depth_image_subscriber = self.create_subscription(
+            Image,
+            '/drone/front_depth',
+            self.depth_image_callback,
+            10)
+        
+        # Publishers
+        self.cylinder_center_publisher = self.create_publisher(
+            Point,
+            '/geometry/cylinder_center',
+            10)
+        
+        self.cylinder_info_publisher = self.create_publisher(
+            Float32MultiArray,
+            '/geometry/cylinder_info',
+            10)
+            
+        self.cylinder_pose_publisher = self.create_publisher(
+            PoseStamped,
+            '/geometry/cylinder_pose',
+            10)
+            
+        self.marker_publisher = self.create_publisher(
+            MarkerArray,
+            '/visualization/cylinders',
+            10)
+            
+        self.debug_image_publisher = self.create_publisher(
+            Image,
+            '/cylinder_detector/debug_image',
+            10)
+        
+        self.get_logger().info('Cylinder detector node initialized')
+    
+    def camera_info_callback(self, msg):
+        """Process incoming camera calibration data."""
+        if not self.camera_info_received:
+            self.camera_matrix = np.array(msg.k).reshape(3, 3)
+            self.distortion_coeffs = np.array(msg.d)
+            self.camera_info_received = True
+            self.get_logger().info('Camera calibration received')
+            self.get_logger().info(f'Camera matrix:\n{self.camera_matrix}')
+    
     def depth_image_callback(self, msg):
-        """Process depth image to detect geometric shapes."""
+        """Process depth image to detect cylinders."""
         try:
-            # Convert ROS Image to OpenCV format - for depth data (32FC1)
-            depth_image = self.cv_bridge.imgmsg_to_cv2(msg, desired_encoding='32FC1')
+            # Convert ROS Image to OpenCV format
+            depth_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='32FC1')
             
             # Create a copy for visualization and processing
             depth_display = depth_image.copy()
@@ -40,11 +114,11 @@ class GeometryTracker(Node):
             # Replace NaN values with 0 for visualization
             depth_display[np.isnan(depth_display)] = 0
             
-            # Set fixed depth range for better visualization (0-10 meters is a good range for indoor scenes)
+            # Set depth range for visualization (0-10 meters)
             depth_min = 0.0
-            depth_max = 10.0  # Maximum depth range to visualize
+            depth_max = 10.0
             
-            # Clip depth values to the range and normalize
+            # Clip and normalize the depth values for visualization
             depth_normalized = np.clip(depth_display, depth_min, depth_max)
             depth_normalized = ((depth_normalized - depth_min) * 255 / (depth_max - depth_min))
             depth_normalized = depth_normalized.astype(np.uint8)
@@ -61,31 +135,7 @@ class GeometryTracker(Node):
             # Edge detection using Canny
             edges = cv2.Canny(blurred, 50, 150)
             
-            # Find vertical lines using Hough transform
-            lines = cv2.HoughLinesP(edges, 1, np.pi/180, 50, minLineLength=100, maxLineGap=10)
-            vertical_lines = []
-            
-            if lines is not None:
-                for line in lines:
-                    x1, y1, x2, y2 = line[0]
-                    # Calculate line angle
-                    angle = np.abs(np.arctan2(y2 - y1, x2 - x1) * 180 / np.pi)
-                    
-                    # Filter for near-vertical lines (within 20 degrees of vertical)
-                    if angle > 70 and angle < 110:
-                        vertical_lines.append(line[0])
-                        # Draw vertical lines in red
-                        cv2.line(debug_image, (x1,y1), (x2,y2), (0,0,255), 2)
-                        # Add line angle text
-                        cv2.putText(debug_image, 
-                                  f'{angle:.1f}°', 
-                                  (x1, y1-10), 
-                                  cv2.FONT_HERSHEY_SIMPLEX, 
-                                  0.5, 
-                                  (0,0,255), 
-                                  1)
-            
-            # Find contours for cylinder detection
+            # Find contours for potential cylinder boundaries
             contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             
             # Draw all contours in green (light)
@@ -108,7 +158,7 @@ class GeometryTracker(Node):
                     ellipse = cv2.fitEllipse(contour)
                     (center_x, center_y), (width, height), angle = ellipse
                     
-                    # Calculate aspect ratio and confidence
+                    # Calculate aspect ratio and confidence score
                     aspect_ratio = min(width, height) / max(width, height)
                     angle_confidence = 1.0 - abs(angle - 90) / 90
                     size_confidence = min(width, height) / 100  # Normalize by expected size
@@ -156,12 +206,23 @@ class GeometryTracker(Node):
                         center_msg.x = float(center_x)
                         center_msg.y = float(center_y)
                         center_msg.z = float(center_depth)
-                        self.cylinder_pose_pub.publish(center_msg)
+                        self.cylinder_center_publisher.publish(center_msg)
+                        
+                        # Estimate real-world dimensions
+                        # This is a simplification - actual implementation would use proper camera calibration
+                        # to convert from pixels to real-world units based on depth
+                        real_width = width * center_depth / self.camera_matrix[0, 0] if self.camera_matrix is not None else width * 0.001 * center_depth
+                        real_height = height * center_depth / self.camera_matrix[1, 1] if self.camera_matrix is not None else height * 0.001 * center_depth
                         
                         # Publish cylinder info (width, height, angle, confidence)
                         info_msg = Float32MultiArray()
-                        info_msg.data = [float(width), float(height), float(angle), float(confidence)]
-                        self.cylinder_info_pub.publish(info_msg)
+                        info_msg.data = [float(real_width), float(real_height), float(angle), float(confidence)]
+                        self.cylinder_info_publisher.publish(info_msg)
+                        
+                        self.get_logger().info(
+                            f"Detected cylinder: center=({center_x}, {center_y}, {center_depth:.2f}m), "
+                            f"dimensions={real_width:.2f}x{real_height:.2f}m, confidence={confidence:.2f}"
+                        )
             
             # Draw center crosshair
             height, width = depth_image.shape[:2]
@@ -180,34 +241,10 @@ class GeometryTracker(Node):
                           (0,255,255), 
                           2)
             
-            # Add legend
-            cv2.putText(debug_image, "Red: Vertical Lines", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255), 1)
-            cv2.putText(debug_image, "Blue: Cylinder Fits", (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,0,0), 1)
-            cv2.putText(debug_image, "Yellow: Centers", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,255), 1)
-            
-            # Add depth range info
-            cv2.putText(debug_image, 
-                      f'Depth range: {depth_min:.2f}m - {depth_max:.2f}m', 
-                      (10, 80), 
-                      cv2.FONT_HERSHEY_SIMPLEX, 
-                      0.5, 
-                      (255,255,255), 
-                      1)
-            
             # Publish debug image
-            debug_msg = self.cv_bridge.cv2_to_imgmsg(debug_image, encoding='bgr8')
+            debug_msg = self.bridge.cv2_to_imgmsg(debug_image, encoding='bgr8')
             debug_msg.header = msg.header
-            self.debug_image_pub.publish(debug_msg)
+            self.debug_image_publisher.publish(debug_msg)
                 
         except Exception as e:
             self.get_logger().error(f'Error processing depth image: {str(e)}')
-
-def main():
-    rclpy.init()
-    node = GeometryTracker()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
-
-if __name__ == '__main__':
-    main() 
