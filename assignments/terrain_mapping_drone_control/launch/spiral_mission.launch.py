@@ -10,11 +10,11 @@ import os
 
 def generate_launch_description():
     """
-    Launch description for the full cylinder landing mission.
+    Launch description for the spiral mission.
     This includes:
     - The cylinder landing simulator environment
     - Cylinder detector node
-    - Cylinder landing controller node
+    - Spiral trajectory controller
     - RViz for visualization
     """
     
@@ -54,20 +54,19 @@ def generate_launch_description():
         output='screen'
     )
     
-    # Cylinder landing controller node
-    cylinder_landing_controller_node = Node(
+    # Spiral trajectory controller node
+    spiral_trajectory_node = Node(
         package='terrain_mapping_drone_control',
-        executable='cylinder_landing_controller.py',
-        name='cylinder_landing_controller',
+        executable='spiral_trajectory.py',
+        name='spiral_trajectory',
         parameters=[{
             'use_sim_time': use_sim_time,
-            'takeoff_height': 15.0,       # meters
-            'search_height': 11.0,        # meters
-            'search_speed': 2.0,          # m/s
-            'position_threshold': 0.5,    # meters
-            'heading_threshold': 0.1,     # radians
-            'search_radius': 20.0,        # meters
-            'min_confidence': 0.7         # minimum confidence for cylinder detection
+            'initial_height': 12.0,       # meters
+            'spiral_diameter': 20.0,      # meters
+            'descent_rate': 0.2,          # m/s
+            'spiral_period': 15.0,        # seconds per revolution
+            'min_height': 5.0,            # minimum height
+            'height_threshold': 0.3       # meters
         }],
         output='screen'
     )
@@ -121,7 +120,7 @@ def generate_launch_description():
             ),
             TimerAction(
                 period=7.0,  # Starts after pose visualizer
-                actions=[cylinder_landing_controller_node]
+                actions=[spiral_trajectory_node]
             ),
             TimerAction(
                 period=8.0,  # Start RViz last

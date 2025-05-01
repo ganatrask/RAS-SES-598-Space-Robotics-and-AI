@@ -8,11 +8,9 @@ from visualization_msgs.msg import MarkerArray, Marker
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 import numpy as np
 from transforms3d.euler import quat2euler, euler2quat
+import time
 
 class PoseVisualizer(Node):
-    """
-    A ROS2 node that visualizes the drone's pose with markers and covariance.
-    """
     def __init__(self):
         super().__init__('pose_visualizer')
         
@@ -49,7 +47,14 @@ class PoseVisualizer(Node):
         self.markers = MarkerArray()
         self.setup_markers()
         
+        # Add debugging timer
+        self.create_timer(1.0, self.debug_timer_callback)
+        
         self.get_logger().info('Pose visualizer node initialized')
+
+    def debug_timer_callback(self):
+        """Periodic debug info"""
+        self.get_logger().info('Pose visualizer is running...')
 
     def setup_markers(self):
         """Setup visualization markers for the drone."""
@@ -87,10 +92,10 @@ class PoseVisualizer(Node):
         marker.scale.x = 0.5  # shaft diameter
         marker.scale.y = 0.1  # head diameter
         marker.scale.z = 0.1  # head length
-        marker.color.r = color[0]
-        marker.color.g = color[1]
-        marker.color.b = color[2]
-        marker.color.a = color[3]
+        marker.color.r = float(color[0])
+        marker.color.g = float(color[1])
+        marker.color.b = float(color[2])
+        marker.color.a = float(color[3])
         return marker
 
     def update_markers(self, position, orientation):
@@ -145,22 +150,34 @@ class PoseVisualizer(Node):
     def odom_callback(self, msg):
         """Handle incoming odometry messages."""
         try:
-            # Extract position
-            position = [
-                msg.position[0],
-                msg.position[1],
-                msg.position[2]
-            ]
+            # Print some debug information about the message
+            self.get_logger().debug(f"Received odometry message: position type: {type(msg.position)}")
             
-            # Extract orientation (quaternion)
-            orientation = [
-                msg.q[0],  # w
-                msg.q[1],  # x
-                msg.q[2],  # y
-                msg.q[3]   # z
-            ]
+            # Create a new position array with explicit conversion to float
+            position = []
+            for i in range(3):
+                try:
+                    if i < len(msg.position):
+                        position.append(float(msg.position[i]))
+                    else:
+                        position.append(0.0)  # Default if index doesn't exist
+                except (IndexError, TypeError, ValueError) as e:
+                    self.get_logger().error(f"Error converting position[{i}]: {e}")
+                    position.append(0.0)
             
-            # Update and publish markers
+            # Create a new orientation array with explicit conversion to float
+            orientation = []
+            for i in range(4):
+                try:
+                    if i < len(msg.q):
+                        orientation.append(float(msg.q[i]))
+                    else:
+                        orientation.append(0.0 if i > 0 else 1.0)  # Default quaternion [1,0,0,0]
+                except (IndexError, TypeError, ValueError) as e:
+                    self.get_logger().error(f"Error converting q[{i}]: {e}")
+                    orientation.append(0.0 if i > 0 else 1.0)
+            
+            # Update and publish markers with the safe values
             self.update_markers(position, orientation)
             self.marker_pub.publish(self.markers)
             
@@ -185,4 +202,4 @@ def main():
         rclpy.shutdown()
 
 if __name__ == '__main__':
-    main() 
+    main()
