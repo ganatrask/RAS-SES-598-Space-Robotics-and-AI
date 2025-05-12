@@ -164,6 +164,11 @@ The analysis script generates plots for:
 - Control Force (N)
 - Phase space diagrams
 
+![video link](https://github.com/ganatrask/RAS-SES-598-Space-Robotics-and-AI/blob/main/assignments/cart_pole_optimal_control/cart-pole.webm)
+![baseline_performance](https://github.com/ganatrask/RAS-SES-598-Space-Robotics-and-AI/blob/main/assignments/cart_pole_optimal_control/baseline_performance.png)
+![phase_plots](https://github.com/ganatrask/RAS-SES-598-Space-Robotics-and-AI/blob/main/assignments/cart_pole_optimal_control/phase_plots.png)
+
+
 ## 10. Discussion and Recommendations
 
 ### Lessons Learned:
