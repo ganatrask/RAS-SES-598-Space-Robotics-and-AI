@@ -13,7 +13,7 @@ def generate_launch_description():
     return LaunchDescription([
         # Gazebo (headless mode)
         ExecuteProcess(
-            cmd=['gz', 'sim', '-r', '-s', 'empty.sdf'],  # -s for headless mode
+            cmd=['ign', 'gazebo', '-r', '-s', '/usr/share/ignition/ignition-gazebo6/worlds/empty.sdf'],  # -s for headless mode
             output='screen'
         ),
 
